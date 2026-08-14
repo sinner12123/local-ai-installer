@@ -57,9 +57,10 @@ def probe_url(url, timeout=15):
         return False, 0
 
 
-def download(url, dest, progress_cb=None, retries=3):
+def download(url, dest, progress_cb=None, retries=5):
     """下载文件, 断点续传 + 重试。progress_cb(downloaded, total)。
     连接中断/文件不完整会被检测并重试, 绝不把残缺文件当成功。
+    SSL EOF 等间歇性断连会退避重试多次; .part 断点文件始终保留, 可跨进程续传。
     返回最终文件大小 (字节); 失败抛异常。"""
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -96,16 +97,18 @@ def download(url, dest, progress_cb=None, retries=3):
         except RuntimeError as e:
             if attempt >= retries:
                 raise
-            time.sleep(2 * attempt)
+            time.sleep(3 * attempt)
         except Exception as e:
             if attempt >= retries:
                 raise RuntimeError(f"下载失败 (第{attempt}次): {url}\n  {e}")
-            time.sleep(2 * attempt)
+            # 间歇性断连 (SSL EOF 等): 指数退避后从断点续传
+            time.sleep(3 * attempt)
     raise RuntimeError(f"下载失败: {url}")
 
 
 def try_mirrors(urls, dest, progress_cb=None, retries=2, desc=""):
-    """依次尝试多个镜像, 返回成功下载的 URL; 全失败抛异常。"""
+    """依次尝试多个镜像, 返回成功下载的 URL; 全失败抛异常。
+    关键: 失败时保留 .part 断点文件, 下一个镜像从断点续传, 不浪费已下字节。"""
     last_err = None
     for u in urls:
         try:
@@ -115,10 +118,9 @@ def try_mirrors(urls, dest, progress_cb=None, retries=2, desc=""):
             return u
         except Exception as e:
             last_err = e
+            # 只删残缺的最终文件; .part 断点文件保留供续传
             if dest.exists():
                 dest.unlink()
-            if dest.with_suffix(dest.suffix + ".part").exists():
-                dest.with_suffix(dest.suffix + ".part").unlink()
             continue
     raise RuntimeError(f"{desc or '下载'}失败: {last_err}")
 
