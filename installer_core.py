@@ -35,6 +35,15 @@ HF_MIRRORS = [
     "https://hf-mirror.com",       # 国内主镜像 (快)
     "https://huggingface.co",      # 官方 (回退)
 ]
+# 魔搭 (ModelScope, 阿里): 国内满速 (~7MB/s), Qwen 官方 GGUF 仓库。
+# 仅部分模型有 Q4_K_M (4B/8B/14B/32B 有; 1.7B 只有 Q8_0; 35B-A3B 没有)。
+MODELSCOPE_BASE = "https://modelscope.cn"
+MODELSCOPE_REPOS = {
+    "qwen3-4b":  "Qwen/Qwen3-4B-GGUF",
+    "qwen3-8b":  "Qwen/Qwen3-8B-GGUF",
+    "qwen3-14b": "Qwen/Qwen3-14B-GGUF",
+    "qwen3-32b": "Qwen/Qwen3-32B-GGUF",
+}
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) LocalAI-Installer/1.0"
 
@@ -128,15 +137,29 @@ def try_mirrors(urls, dest, progress_cb=None, retries=2, desc=""):
 
 # ---------------------------------------------------------------- llama.cpp
 
-# RTX 50 系 (Blackwell, sm_120) 需要 CUDA >= 12.8, 用 13.3 构建; 老卡用 12.4
+# RTX 50 系 (Blackwell, sm_120) 需要 CUDA >= 12.8。llama.cpp 的 CUDA 13.3 构建
+# 需要配套 cudart 13.3 runtime DLL 且驱动 >= 对应版本 (591.x 只到 CUDA 13.1);
+# 驱动不够新时, 50 系应回退 Vulkan 构建 (无 runtime 依赖, 速度接近 CUDA)。
 BLACKWELL_MARKERS = ("rtx 50", "rtx 5060", "rtx 5070", "rtx 5080", "rtx 5090",
                      "rtx 5060ti", "rtx 5070ti", "rtx 5080ti", "rtx 5090d",
                      "blackwell", "b200", "b100", "gb200", "gb100", "rtx pro 50")
+
+# CUDA runtime minor -> 所需最小驱动版本 (粗估: CUDA 13.x 每 minor 对应驱动阶梯)
+# 驱动版本 >= 表值时 CUDA 13.3 构建可用, 否则回退 Vulkan
+CUDA_13_3_MIN_DRIVER = 592.0
 
 
 def is_blackwell(gpu_name=""):
     nl = (gpu_name or "").lower()
     return any(m in nl for m in BLACKWELL_MARKERS)
+
+
+def driver_supports_cuda_13_3(driver=""):
+    """驱动版本足够新则可用 CUDA 13.3 构建, 否则回退 Vulkan。"""
+    try:
+        return float(driver) >= CUDA_13_3_MIN_DRIVER
+    except (TypeError, ValueError):
+        return False
 
 
 def llama_cpp_asset_name(engine, gpu_name=""):
@@ -191,15 +214,24 @@ def find_exe(root, name):
 
 # ---------------------------------------------------------------- 模型
 
-def model_urls(repo, filename):
-    return [f"{m}/{repo}/resolve/main/{filename}" for m in HF_MIRRORS]
+def model_urls(repo, filename, model_id=None):
+    """模型下载 URL 列表: 优先魔搭 (国内满速), 再 hf-mirror, 最后 HF 官方。"""
+    urls = []
+    ms_repo = MODELSCOPE_REPOS.get(model_id or "")
+    if ms_repo:
+        urls.append(f"{MODELSCOPE_BASE}/models/{ms_repo}/resolve/master/{filename}")
+    urls += [f"{m}/{repo}/resolve/main/{filename}" for m in HF_MIRRORS]
+    return urls
 
 
-def expected_model_size(repo, filename):
+def expected_model_size(repo, filename, model_id=None):
     """HEAD 请求获取模型真实大小 (用于完整性校验)。"""
-    for base in HF_MIRRORS:
+    for base in ([MODELSCOPE_BASE] if model_id in MODELSCOPE_REPOS else []) + HF_MIRRORS:
         try:
-            ok, size = probe_url(f"{base}/{repo}/resolve/main/{filename}", timeout=20)
+            url = (f"{base}/models/{MODELSCOPE_REPOS[model_id]}/resolve/master/{filename}"
+                   if base == MODELSCOPE_BASE
+                   else f"{base}/{repo}/resolve/main/{filename}")
+            ok, size = probe_url(url, timeout=20)
             if ok and size > 0:
                 return size
         except Exception:
@@ -214,7 +246,7 @@ def install_model(install_dir, model, progress_cb=None):
     models_dir.mkdir(parents=True, exist_ok=True)
     dest = models_dir / model["file"]
 
-    expected = expected_model_size(model["repo"], model["file"])
+    expected = expected_model_size(model["repo"], model["file"], model.get("id"))
     if dest.exists() and dest.stat().st_size > 10**6:
         if expected and abs(dest.stat().st_size - expected) > expected * 0.01:
             print(f"模型文件不完整 ({dest.stat().st_size}/{expected} 字节), 重新下载")
@@ -225,10 +257,11 @@ def install_model(install_dir, model, progress_cb=None):
             return str(dest)
 
     print(f"[下载模型] {model['name']} ({model['size_gb']}GB)")
-    try_mirrors(model_urls(model["repo"], model["file"]), dest, progress_cb,
+    try_mirrors(model_urls(model["repo"], model["file"], model.get("id")), dest, progress_cb,
                 desc=f"模型 {model['file']}")
-    # 下载后二次校验
-    if expected and dest.stat().st_size < expected:
+    # 下载后二次校验: HEAD 大小与实际文件可能有微小差异 (魔搭差 1KB),
+    # 允许 1% 容差; download() 内部已用 GET Content-Length 严格校验过完整性
+    if expected and dest.stat().st_size < expected * 0.99:
         raise RuntimeError(f"模型下载不完整: {dest.stat().st_size}/{expected} 字节")
     print(f"模型就绪: {dest}")
     return str(dest)

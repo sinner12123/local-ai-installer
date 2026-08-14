@@ -12,6 +12,13 @@
 量化策略: 一般聊天 Q4_K_M 起步; 内存宽裕可上 Q5_K_M/Q6_K。
 """
 
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import installer_core as core
+
 MODELS = [
     {
         "id": "qwen3-1.7b", "name": "Qwen3-1.7B (轻量, 老旧电脑)",
@@ -77,7 +84,12 @@ def recommend(hw):
     engine, ngl = "cpu", 0
 
     if nvidia and vram >= 3:
-        engine, ngl = "cuda", 999          # 全层进 GPU
+        # Blackwell (RTX 50系) 需要 CUDA 13.3 构建 + 新驱动; 驱动不够新回退 Vulkan
+        nv = nvidia[0]
+        if core.is_blackwell(nv.get("name", "")) and not core.driver_supports_cuda_13_3(nv.get("driver", "")):
+            engine, ngl = "vulkan", 999
+        else:
+            engine, ngl = "cuda", 999          # 全层进 GPU
     elif amd or intel:
         engine, ngl = "vulkan", 999
     # CPU 纯推: engine="cpu", ngl=0
