@@ -280,13 +280,15 @@ def write_launch_scripts(install_dir, model_path, engine, ngl, ctx, server_port=
 
     # ---- start-server.cmd
     start_server = scripts / "start-server.cmd"
+    # Qwen3 自带思考模式, 本地聊天默认关闭 (--reasoning off), 否则回复被思考截断且变慢
+    reasoning = "--reasoning off" if "qwen" in model_path.lower() else ""
     # Windows cmd 转义: % 写成 %%
     start_server.write_text(
         f"""@echo off
 chcp 65001 >nul
 title Local AI - llama-server (port {server_port})
 echo 正在启动本地大模型服务...
-"{server_exe}" -m "{model_path}" --port {server_port} -c {ctx} -ngl {ngl} --jinja --alias "local-ai"
+"{server_exe}" -m "{model_path}" --port {server_port} -c {ctx} -ngl {ngl} --jinja {reasoning} --alias "local-ai"
 echo.
 echo 服务已退出 (按任意键关闭)
 pause >nul
@@ -383,9 +385,12 @@ def wait_server(url, timeout=120):
 
 
 def start_server_background(server_exe, model_path, port=8080, ctx=8192, ngl=999):
-    """后台启动 llama-server, 返回 Popen 对象。"""
+    """后台启动 llama-server, 返回 Popen 对象。
+    Qwen3 等带思考模式的模型默认关闭 (--reasoning off), 避免回复被思考截断。"""
     cmd = [server_exe, "-m", model_path, "--port", str(port),
            "-c", str(ctx), "-ngl", str(ngl), "--jinja", "--alias", "local-ai"]
+    if "qwen" in model_path.lower():
+        cmd += ["--reasoning", "off"]
     return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 

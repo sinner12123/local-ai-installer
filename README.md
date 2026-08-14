@@ -67,12 +67,18 @@ hermes_setup.py     Hermes 集成 (独立 profile)
 
 ## 技术说明
 
-- llama.cpp: 官方 GitHub Releases (b10424), CUDA 12.4 / 13.3 / Vulkan / CPU 版
-  (RTX 50 系 Blackwell 自动选 CUDA 13.3, 老显卡用 12.4)
-- 模型: unsloth 的 Qwen3 系列 GGUF (Q4_K_M 量化, 已验证文件存在和大小)
-- 下载: 断点续传 + 完整性校验 (绝不把残缺文件当成功);
-  模型走 hf-mirror.com → huggingface.co 回退; llama.cpp 走 GitHub 直连 + 镜像回退
+- llama.cpp: 官方 GitHub Releases (b10424)
+  - NVIDIA 老显卡: CUDA 12.4 构建
+  - RTX 50 系 (Blackwell): 优先 CUDA 13.3 (需新驱动), 驱动不够新自动回退 Vulkan 构建
+  - AMD/Intel 独显: Vulkan; 无独显: CPU
+  (注意: CUDA 13.3 构建需要配套 cudart 13.3 runtime, 且驱动版本足够新)
+- 模型: unsloth / Qwen 官方 GGUF (Q4_K_M 量化)
+  - 下载源优先级: 魔搭 ModelScope (国内满速 ~7MB/s) → hf-mirror → HuggingFace 官方
+- 下载: 断点续传 + 完整性校验 (绝不把残缺文件当成功); 换镜像保留 .part 续传
 - 端口: 自动检测 8080 占用 (ollama 等), 冲突时自动换空闲端口
+- Qwen3 思考模式: 本地聊天默认关闭 (`--reasoning off`), 否则回复被思考截断且变慢
+- 显存不足提示: 若显卡显存被其他程序占用 (浏览器/Electron 应用等),
+  GPU 加速可能不可用, 会自动降级 CPU 推理
 - 模型下载后默认在 `<安装目录>/models/`, 引擎在 `<安装目录>/llama.cpp/`
 - 服务: llama-server OpenAI 兼容 API, 默认 `http://127.0.0.1:8080/v1`
 - mini_agent 通过 OpenAI 兼容接口对话, 支持多轮上下文和流式输出
