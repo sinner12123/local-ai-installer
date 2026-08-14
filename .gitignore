@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# 构建产物
+build/
+dist/
+*.spec
+
+# 本地测试目录
+local-ai/
+_test_*/
+
+# 大文件
+*.gguf
+*.gguf.part
+*.zip
+*.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
