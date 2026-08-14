@@ -109,6 +109,7 @@ def download(url, dest, progress_cb=None, retries=5):
 def try_mirrors(urls, dest, progress_cb=None, retries=2, desc=""):
     """依次尝试多个镜像, 返回成功下载的 URL; 全失败抛异常。
     关键: 失败时保留 .part 断点文件, 下一个镜像从断点续传, 不浪费已下字节。"""
+    dest = Path(dest)
     last_err = None
     for u in urls:
         try:
