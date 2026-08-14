@@ -25,3 +25,4 @@ _test_*/
 .idea/
 .vscode/
 *.swp
+vulkan-test.bin
